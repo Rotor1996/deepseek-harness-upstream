@@ -108,6 +108,7 @@
     "tests/models-settings.e2e.ts",
     "tests/deepseek-messages-settings.e2e.ts",
     "tests/deepseek-messages-chat.e2e.ts",
+    "tests/grok-thinking.e2e.ts",
     "tests/models-settings-recovery.e2e.ts",
     "tests/default-model.e2e.ts",
     "tests/model-menu-observer.e2e.ts",

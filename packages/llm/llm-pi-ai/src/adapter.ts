@@ -62,6 +62,7 @@ import type { ResolvedPiAiProviderProfile } from './config.ts'
 import { requestImageTarget, toPiContext } from './context.ts'
 import { conversationUpdates, createModels, getSupportedThinkingLevels } from './models.ts'
 import { toStreamChunks } from './stream.ts'
+import { parseThinkTagStream } from './think-tags.ts'
 
 /**
  * Initially active declaration added to an Anthropic request whose projected
@@ -424,25 +425,29 @@ export class PiAiAdapter extends LlmAdapter {
         headers: requestHeaders(profile.headers),
       })
       const iterator = toStreamChunks(events, model.contextWindow, options.signal, model.id)[Symbol.asyncIterator]()
-      let exhausted = false
-      try {
-        while (true) {
-          const result = await watchdog.next(iterator)
-          if (result.done) {
-            exhausted = true
-            return
+      async function* watchedChunks(): AsyncGenerator<StreamChunk> {
+        let exhausted = false
+        try {
+          while (true) {
+            const result = await watchdog.next(iterator)
+            if (result.done) {
+              exhausted = true
+              return
+            }
+            yield result.value
           }
-          yield result.value
-        }
-      } finally {
-        if (!exhausted) {
-          consumer.abort('pi-ai stream consumer stopped')
-          // A demand the deadline abandoned can stay pending forever, and this
-          // generator queues its return behind it; the abort above owns SDK termination.
-          /* v8 ignore next -- the detached drain only rejects while unwinding an abandoned stream. */
-          void iterator.return(undefined).catch(() => {})
+        } finally {
+          if (!exhausted) {
+            consumer.abort('pi-ai stream consumer stopped')
+            // A demand the deadline abandoned can stay pending forever, and this
+            // generator queues its return behind it; the abort above owns SDK termination.
+            /* v8 ignore next -- the detached drain only rejects while unwinding an abandoned stream. */
+            void iterator.return(undefined).catch(() => {})
+          }
         }
       }
+      const chunks = watchedChunks()
+      yield* profile.thinkTagModels.has(model.id) ? parseThinkTagStream(chunks) : chunks
     } catch (error: unknown) {
       if (timeoutOf(watchdog.signal, 'LLM_STREAM_IDLE_TIMEOUT') !== undefined) {
         throw new LlmError(`pi-ai stream idle timeout after ${streamIdleTimeoutMs}ms`, 'TIMEOUT', { cause: error })

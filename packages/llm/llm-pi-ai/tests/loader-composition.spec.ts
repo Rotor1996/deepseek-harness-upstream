@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader, { type ModuleLoaderV2 } from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
-import LlmRuntime, { createMessage, createUserMessage, userAgent } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { EMPTY_RESPONSE_CODE, createMessage, createUserMessage, userAgent } from '@deepseek-ai/dsh-llm'
 import AuthorizationService from '@deepseek-ai/dsh-authorization'
 import LocalCredentialProvider from '@deepseek-ai/dsh-credentials-local'
 import { profileComposition } from '../../../settings/settings/tests/profile-composition.ts'
@@ -289,4 +289,66 @@ describe('llm-pi-ai real dormant composition', () => {
       ],
     })
   })
+})
+
+
+describe('configured think-tag normalization through Loader', () => {
+  it.each([true, false])('keeps tool calls and replay aligned with parseThinkTags=%s', async (enabled) => {
+    const delta = (value: object) => JSON.stringify({ choices: [{ index: 0, delta: value, finish_reason: null }] })
+    const server = await mockServer([{ events: [
+      delta({ role: 'assistant', content: '<thi' }),
+      delta({ tool_calls: [{ index: 0, id: 'call-1', type: 'function', function: { name: 'echo', arguments: '{}' } }] }),
+      delta({ content: 'nk>plan</thi' }),
+      delta({ content: 'nk>answer' }),
+      JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] }),
+      '[DONE]',
+    ] }, { events: textEvents }])
+    const { ctx, settingsPath } = await loadComposition()
+    await writeFile(settingsPath, [
+      '- id: llm-pi-ai',
+      '  config:',
+      '    providers:',
+      '      gateway:',
+      '        apiKeyEnv: PI_COMPOSITION_KEY',
+      '        api: openai-completions',
+      `        baseURL: ${server.url}`,
+      '        models:',
+      '          - id: grok-test',
+      `            parseThinkTags: ${enabled}`,
+      '',
+    ].join('\n'))
+    await vi.waitFor(() => { expect(ctx.llm.listProviders().map(provider => provider.id)).toEqual(['gateway']) }, { timeout: 5000 })
+    const first = await assemble(ctx, { provider: 'gateway', model: 'grok-test', messages: [] })
+    expect(first.message.content).toEqual([
+      ...enabled ? [
+        { type: 'reasoning', text: 'plan' },
+        { type: 'tool-call', id: 'call-1', name: 'echo', arguments: '{}' },
+        { type: 'text', text: 'answer' },
+      ] : [
+        { type: 'text', text: '<think>plan</think>answer' },
+        { type: 'tool-call', id: 'call-1', name: 'echo', arguments: '{}' },
+      ],
+    ])
+    await assemble(ctx, { provider: 'gateway', model: 'grok-test', messages: [first.message] })
+    expect(server.requests[1]).toHaveProperty('messages.0.content', enabled ? 'answer' : '<think>plan</think>answer')
+    if (enabled) expect(server.requests[1]).toHaveProperty('messages.0.reasoning_content', 'plan')
+    else expect(server.requests[1]).not.toHaveProperty('messages.0.reasoning_content')
+  })
+  it('reports an empty response after removing an empty think section', async () => {
+    const server = await mockServer([{ events: [
+      JSON.stringify({ choices: [{ index: 0, delta: { content: '<think></think>' }, finish_reason: null }] }),
+      JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] }),
+      '[DONE]',
+    ] }])
+    const { ctx, settingsPath } = await loadComposition()
+    await writeFile(settingsPath, JSON.stringify([{ id: 'llm-pi-ai', config: { providers: { gateway: {
+      apiKeyEnv: 'PI_COMPOSITION_KEY', api: 'openai-completions', baseURL: server.url,
+      models: [{ id: 'grok-test', parseThinkTags: true }],
+    } } } }]))
+    await vi.waitFor(() => { expect(ctx.llm.listProviders().map(provider => provider.id)).toEqual(['gateway']) }, { timeout: 5000 })
+    const result = await assemble(ctx, { provider: 'gateway', model: 'grok-test', messages: [] })
+    expect(result.message.content).toEqual([])
+    expect(result.finish).toMatchObject({ kind: 'error', failure: { code: EMPTY_RESPONSE_CODE } })
+  })
+
 })

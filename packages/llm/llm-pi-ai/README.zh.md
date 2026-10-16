@@ -106,6 +106,8 @@ profile 的 `models` 列表会替换而非扩展路由的已安装目录；每�
 
 对于自托管 Chat Completions 端点，`thinkingTokenBudgetField` 选择推理预算参数，`vllmPriority` 在服务端启用优先级调度时设置整数调度优先级。模板参数接受 `$var: thinking.budget`。`openai-responses` 网关可设置 `supportsMaxOutputTokens: false` 来省略 `max_output_tokens`；Azure 与 Codex 传输会忽略这个共享兼容字段。这些控制均需显式启用；目录拥有的 Anthropic effort 和回退能力不是可配置开关。
 
+仅当 Chat Completions 端点在普通正文开头返回 `<think>` 段时，才在对应的 `models` 条目或 `modelOverrides` 值中设置 `parseThinkTags: true`。适配器将该段流式输出为思考内容，支持标签跨分片，并在工具调用或响应结束时将未闭合段保留为思考。`</think>` 之后的内容仍为正文；普通段落或代码围栏内的标签保持原样。此选项默认关闭，拒绝用于其他协议，且只影响新响应。流式消息块、已保存消息和回放元数据保持对齐，不改写已有会话。开头的文本段尚未产生非空输出时，交错到达的其他消息块等待该段分类或结束；后续拆分出的消息块按实际到达顺序输出。缓冲期间，原始流数据仍会刷新空闲计时。正常结束却没有保留任何消息块的响应会报告 `EMPTY_RESPONSE`。
+
 ### 运行时更改配置
 
 每次操作捕获当前 `providers` Config 引用。新增或修改的 provider 配置在表单持久化前验证；未更改的目录故障仍可编辑。路由集合或重试策略变化时原子更新注册；如果其他适配器已拥有所请求的路由，则保留先前路由。

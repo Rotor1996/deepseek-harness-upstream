@@ -216,6 +216,8 @@ export interface ResolvedPiAiProviderProfile
    * own, so a catalog capability must not appear here.
    */
   configuredMaxTokens: ReadonlyMap<string, number>
+  /** Chat Completions model ids opting into leading think-tag parsing. */
+  thinkTagModels: ReadonlySet<string>
 }
 
 /** Plugin configuration: the provider routes this instance owns. */
@@ -312,6 +314,7 @@ const modelFields = {
   // `{}`, and absent must stay distinguishable — it means "inherit the
   // installed catalog's capability", while `false` disables reasoning.
   reasoningEfforts: z.union([z.const(false), reasoningEfforts]),
+  parseThinkTags: z.boolean(),
   compat: compatProfile,
 }
 
@@ -502,6 +505,7 @@ export function resolveProfiles(
       ...rest.thinkingBudgets === undefined ? {} : { thinkingBudgets: { ...rest.thinkingBudgets } },
       configuredMaxTokens: catalog?.configuredMaxTokens ?? new Map(),
       modelErrors: catalog?.modelErrors ?? new Map(),
+      thinkTagModels: catalog?.thinkTagModels ?? new Set(),
       ...piProvider === undefined ? {} : { piProvider },
       ...catalogError === undefined ? {} : { catalogError },
     })

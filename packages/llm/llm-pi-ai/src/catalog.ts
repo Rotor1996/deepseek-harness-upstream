@@ -634,6 +634,8 @@ export interface PiAiModelProfile {
    * declares the offered levels and their wire spellings.
    */
   reasoningEfforts?: false | PiAiReasoningEfforts
+  /** Parse a leading `<think>` section as reasoning on Chat Completions; disabled when omitted. */
+  parseThinkTags?: boolean
   /** pi-ai wire-compatibility switches for this model, winning over the route's per field; one its protocol does not declare is refused. */
   compat?: PiAiCompatProfile
 }
@@ -843,6 +845,8 @@ export interface RouteCatalog {
    * picked, so only an explicit configuration lands here.
    */
   configuredMaxTokens: ReadonlyMap<string, number>
+  /** Chat Completions model ids opting into leading think-tag parsing. */
+  thinkTagModels: ReadonlySet<string>
 }
 
 /**
@@ -908,6 +912,7 @@ export function resolveRouteModels(
   assertOfferedCompatFields(provider, 'route', request.compat)
   const seen = new Set<string>()
   const configuredMaxTokens = new Map<string, number>()
+  const thinkTagModels = new Set<string>()
   const resolveEntry = (entry: PiAiModelProfile): Model<Api> => {
     assertOfferedCompatFields(provider, `model "${entry.id}"`, entry.compat)
     if (entry.id.length === 0) invalid(provider, 'has a model with an empty id')
@@ -918,6 +923,10 @@ export function resolveRouteModels(
     if (api === undefined) {
       invalid(provider, `model "${entry.id}" needs an api; the installed catalog does not describe it, so set the`
         + ' route\'s api to the wire protocol its endpoint speaks')
+    }
+    if (entry.parseThinkTags === true) {
+      if (api !== 'openai-completions') invalid(provider, `model "${entry.id}" parseThinkTags requires openai-completions`)
+      thinkTagModels.add(entry.id)
     }
     const baseUrl = request.baseURL ?? base?.baseUrl ?? providerBaseUrl
     if (baseUrl === undefined) {
@@ -982,5 +991,5 @@ export function resolveRouteModels(
     invalid(provider, `sets compat "${field}", but no model on the route speaks a protocol that takes it;`
       + ` it exists on ${takers.join(', ')}`)
   }
-  return { models: serviceableModels, configuredMaxTokens, modelErrors }
+  return { models: serviceableModels, configuredMaxTokens, modelErrors, thinkTagModels }
 }
